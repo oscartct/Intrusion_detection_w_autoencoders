@@ -16,15 +16,21 @@
  * Might not be necessary with existing .csv but definately useful for better analysis/understanding
   
 2.visualize networks (networkX) *
+  - Not sure how yet
+
+ * If this is only for the graph method then might not be necessary
 
 3. slice into time segments (based on time intervals)
   - Slice segments into time intervals (dur or s/ltime)
   - Oscar's code?
     
 4. represent segments as vector (bert, word2vec)
-   
+   - do a few for comparison
+
 6. train autoencoder with vectors (PyTorch, TensorFlow)
+   - train set on non encoded? 
    
-8. find reconstruction error (Time segment vs reconstruction error graph?)
+8. find reconstruction error 
+   - Time segment vs reconstruction error graph?
    
-10. evaluate based on TP, TN, FP, FN
+10. evaluate based on TP, TN, FP, FN 
