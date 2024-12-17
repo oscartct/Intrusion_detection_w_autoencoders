@@ -1,0 +1,30 @@
+1.take pcap (UNSW-NB15 dataset) (scapy library) *
+  Interesting Features:
+  - srcip, dstip (source/destination IPs)
+  - sport, dsport (source/destination ports)
+  - proto (protocol type)
+  - dur (flow duration)
+  - stime, ltime (start and end times of a flow)
+  - state (FIN, SYN, ACK - communication)
+  - service (HTTP, FTP)
+  - sbytes, dbytes (source and destination bytes)
+  - rate (average bytes per second)
+  - label (Normal or Malicious)
+  - attack_cat (Attack category,port scanning, fingerprinting, Backdoor, DoS, Exploits, Reconnaissance, Worms)
+
+ Take what is useful from the packets
+ * Might not be necessary with existing .csv but definately useful for better analysis/understanding
+  
+2.visualize networks (networkX) *
+
+3. slice into time segments (based on time intervals)
+  - Slice segments into time intervals (dur or s/ltime)
+  - Oscar's code?
+    
+4. represent segments as vector (bert, word2vec)
+   
+6. train autoencoder with vectors (PyTorch, TensorFlow)
+   
+8. find reconstruction error (Time segment vs reconstruction error graph?)
+   
+10. evaluate based on TP, TN, FP, FN
