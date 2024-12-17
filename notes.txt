@@ -23,6 +23,8 @@
 3. slice into time segments (based on time intervals)
   - Slice segments into time intervals (dur or s/ltime)
   - Different segment size options
+  - Separate chunks
+  - overlapping chunks
   - Oscar's code?
     
 4. represent segments as vector
@@ -31,6 +33,7 @@
 
 5. train autoencoder with vectors (PyTorch, TensorFlow)
   - train set on non encoded? 
+  - train with each embed
    
 6. find reconstruction error 
    - Time segment vs reconstruction error graph?
