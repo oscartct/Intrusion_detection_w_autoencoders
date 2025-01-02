@@ -2,11 +2,16 @@ from scapy.all import rdpcap
 import pandas as pd
 from collections import defaultdict
 import os
+from math import ceil
+from sklearn.preprocessing import StandardScaler
 
-def load_chunks_from_pcap(pcap_file, max_packets = 500000, time_interval = 1):
+def load_chunks_from_pcap(pcap_file, overlap, max_packets = 500000, time_interval = 1):
     packet_times = [] 
     features_list = []
 
+    if not (0 <= overlap < 1): # 
+        raise ValueError("Overlap must be between 0 and 1")
+    
     packets = rdpcap(pcap_file, count=max_packets)  # Read all packets
     
     if not packets:
@@ -22,22 +27,24 @@ def load_chunks_from_pcap(pcap_file, max_packets = 500000, time_interval = 1):
     start_time = float(start_time) 
 
     time_chunks = defaultdict(list)
+    step_size = time_interval * (1 - overlap)
     
     for packet in packets:
         if packet.haslayer("IP"):
             timestamp = packet.time
-            time_interval_start = int((timestamp - start_time) // time_interval) * time_interval
-            time_chunks[time_interval_start].append(packet) # Group packets by interval
+            for i in range(ceil((timestamp - start_time) / step_size)): # Round up
+                window_start = start_time + i * step_size
+                if window_start <= timestamp < window_start + time_interval:
+                    time_chunks[window_start].append(packet)
 
     for time_interval_start, packet_chunk in time_chunks.items():
-
         features = extract_features_from_pcap(packet_chunk)
         features_list.append(features)
 
     features_df = pd.DataFrame(features_list, columns=["packet_count", "byte_count", "unique_ips", 
                                                        "unique_ports", "tcp_syn_count", "tcp_ack_count", 
                                                        "tcp_fin_count", "tcp_count", "udp_count", "icmp_count"])
-
+    features_df = normalize_data(features_df)
     print("\nExtracted Features:")
     save_features_to_csv(features_df)
     return features_df
@@ -93,12 +100,15 @@ def extract_features_from_pcap(packets):
     
     return list(features.values()) 
 
+def normalize_data(dataframe):
+    numeric_columns = dataframe.select_dtypes(include=['float64', 'int64']).columns
+    scaler = StandardScaler()
+    dataframe[numeric_columns] = scaler.fit_transform(dataframe[numeric_columns])
+    return dataframe
+
 def save_features_to_csv(features_df):
-    csv = "chunks.csv"
-    if os.path.exists(csv):
-        features_df.to_csv(csv, mode='a', header=False, index=False)
-    else:
-        features_df.to_csv(csv, mode='w', header=True, index=False)
+    csv = "chunks_normalized.csv"
+    features_df.to_csv(csv, mode='w', header=True, index=False)
     print(f"Saved features to {csv}")
     return
 
@@ -113,12 +123,13 @@ def load_features_from_csv(file_path):
         print(f"Error: {e}")
 
 if __name__ == "__main__":
-    file_format = "csv" #pcap or csv 
-    csv = "chunks.csv"
+    file_format = "pcap" # Change this to pcap to get new features and chunks 
+    csv = "chunks_normalized.csv"
     if file_format == "pcap":
         pcap_file = "1.pcap"
         print(f"Loading data from PCAP file: {pcap_file}...")
-        chunks = load_chunks_from_pcap(pcap_file)
+        # Change overlap for the "ladder" chunking, go between 0 and 0.99
+        chunks = load_chunks_from_pcap(pcap_file, overlap=0.25)
     elif file_format == "csv":
         chunks = load_features_from_csv(csv)
     print(chunks)
