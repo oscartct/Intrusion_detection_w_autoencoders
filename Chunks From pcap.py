@@ -1,11 +1,9 @@
 from scapy.all import rdpcap
 import pandas as pd
 from collections import defaultdict
-import os
 from math import ceil
-from sklearn.preprocessing import StandardScaler
 
-def load_chunks_from_pcap(pcap_file, overlap, max_packets = 500000, time_interval = 1):
+def load_chunks_from_pcap(pcap_file, overlap, max_packets = 1000000, time_interval = 1):
     packet_times = [] 
     features_list = []
 
@@ -37,23 +35,24 @@ def load_chunks_from_pcap(pcap_file, overlap, max_packets = 500000, time_interva
                 if window_start <= timestamp < window_start + time_interval:
                     time_chunks[window_start].append(packet)
 
+    prev_chunk_stats = None
     for time_interval_start, packet_chunk in time_chunks.items():
-        features = extract_features_from_pcap(packet_chunk)
+        features, current_chunk_stats = extract_features_from_pcap(packet_chunk, prev_chunk_stats)
         features_list.append(features)
+        prev_chunk_stats = current_chunk_stats
 
-    features_df = pd.DataFrame(features_list, columns=["packet_count", "byte_count", "unique_ips", 
-                                                       "unique_ports", "tcp_syn_count", "tcp_ack_count", 
-                                                       "tcp_fin_count", "tcp_count", "udp_count", "icmp_count"])
-    features_df = normalize_data(features_df)
+    feature_names = list(prev_chunk_stats.keys()) if prev_chunk_stats else list(features.keys())
+    features_df = pd.DataFrame(features_list, columns=feature_names)
     print("\nExtracted Features:")
     save_features_to_csv(features_df)
     return features_df
 
-def extract_features_from_pcap(packets):
-    features = defaultdict(int) 
+def extract_features_from_pcap(packets, prev_chunk_stats=None):
+    features = defaultdict(int)
     
     # Counting protocols
     protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0}
+    packet_sizes = []
     byte_count = 0
     packet_count = len(packets)
     unique_ips = set()
@@ -84,30 +83,41 @@ def extract_features_from_pcap(packets):
         elif packet.haslayer("ICMP"):
             protocol_count["ICMP"] += 1
         
-        byte_count += len(packet)
+        # Collect packet sizes
+        packet_size = len(packet)
+        packet_sizes.append(packet_size)
+        byte_count += packet_size
 
-    # Packet count, byte count, protocol counts, unique IPs and ports
-    features["packet_count"] = packet_count
-    features["byte_count"] = byte_count
-    features["unique_ips"] = len(unique_ips)
-    features["unique_ports"] = len(unique_ports)
-    features["tcp_syn_count"] = tcp_flags["SYN"]
-    features["tcp_ack_count"] = tcp_flags["ACK"]
-    features["tcp_fin_count"] = tcp_flags["FIN"]
-    features["tcp_count"] = protocol_count["TCP"]
-    features["udp_count"] = protocol_count["UDP"]
-    features["icmp_count"] = protocol_count["ICMP"]
-    
-    return list(features.values()) 
+    features["packet_count"] = packet_count # No packets
+    features["byte_count"] = byte_count # Bytes for all packets
+    features["unique_ips"] = len(unique_ips) # Unique Ips 
+    features["unique_ports"] = len(unique_ports) # Unique ports
+    features["tcp_syn_count"] = tcp_flags["SYN"] # Sycnhronize flags
+    features["tcp_ack_count"] = tcp_flags["ACK"] # Acknowledge flags
+    features["tcp_fin_count"] = tcp_flags["FIN"] # Finish flags
+    features["tcp_count"] = protocol_count["TCP"] # TCP packets
+    features["udp_count"] = protocol_count["UDP"] # UDP packets
+    features["icmp_count"] = protocol_count["ICMP"] # ICMP packets
+    features["avg_packet_size"] = sum(packet_sizes) / packet_count if packet_count > 0 else 0 # Average size of packets
+    features["median_packet_size"] = sorted(packet_sizes)[len(packet_sizes) // 2] if packet_sizes else 0 # Median of packets
+    features["max_packet_size"] = max(packet_sizes) if packet_sizes else 0 # Max packet size
+    features["min_packet_size"] = min(packet_sizes) if packet_sizes else 0 # Min packet size
+    features["std_dev_packet_size"] = (
+        (sum((x - features["avg_packet_size"])**2 for x in packet_sizes) / packet_count)**0.5 
+        if packet_count > 0 else 0) # Standard deviation
 
-def normalize_data(dataframe):
-    numeric_columns = dataframe.select_dtypes(include=['float64', 'int64']).columns
-    scaler = StandardScaler()
-    dataframe[numeric_columns] = scaler.fit_transform(dataframe[numeric_columns])
-    return dataframe
+    # Rate of change
+    if prev_chunk_stats: # If previous chunk exists
+        features["rate_of_change_packet_count"] = packet_count - prev_chunk_stats["packet_count"]
+        features["rate_of_change_byte_count"] = byte_count - prev_chunk_stats["byte_count"]
+    else:
+        features["rate_of_change_packet_count"] = 0
+        features["rate_of_change_byte_count"] = 0
+
+    return list(features.values()), features
 
 def save_features_to_csv(features_df):
-    csv = "chunks_normalized.csv"
+    csv = "train_data.csv"
     features_df.to_csv(csv, mode='w', header=True, index=False)
     print(f"Saved features to {csv}")
     return
@@ -124,9 +134,9 @@ def load_features_from_csv(file_path):
 
 if __name__ == "__main__":
     file_format = "pcap" # Change this to pcap to get new features and chunks 
-    csv = "chunks_normalized.csv"
+    csv = "train_data.pcap"
     if file_format == "pcap":
-        pcap_file = "1.pcap"
+        pcap_file = "Monday-WorkingHours.pcap"
         print(f"Loading data from PCAP file: {pcap_file}...")
         # Change overlap for the "ladder" chunking, go between 0 and 0.99
         chunks = load_chunks_from_pcap(pcap_file, overlap=0.25)
