@@ -1,0 +1,117 @@
+import pyshark
+import pandas as pd
+import networkx as nx
+import os
+import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv
+from sklearn.ensemble import IsolationForest
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+
+
+def extract_features(pcap_file, csv_file, chunk_size=10000):
+    if not os.path.exists(pcap_file):
+        raise FileNotFoundError(f"PCAP file '{pcap_file}' not found!")
+
+    print(f"Processing PCAP file: {pcap_file}")
+    data = []
+    packet_count = 0
+    cap = pyshark.FileCapture(pcap_file, display_filter='ip')
+
+    for pkt in cap:
+        try:
+            data.append({
+                'src_ip': pkt.ip.src,
+                'dst_ip': pkt.ip.dst,
+                'protocol': pkt.transport_layer,
+                'size': int(pkt.length),
+                'timestamp': float(pkt.sniff_timestamp)
+            })
+            packet_count += 1
+            if packet_count % chunk_size == 0:
+                print(f"Processed {packet_count} packets...")
+        except AttributeError:
+            continue
+
+    df = pd.DataFrame(data)
+    df.to_csv(csv_file, index=False)
+    print(f"Data saved to: {csv_file}")
+    return df
+
+
+def create_graph(csv_file):
+    df = pd.read_csv(csv_file)
+    aggregated_data = df.groupby(['src_ip', 'dst_ip']).agg({'size': 'sum'}).reset_index()
+    G = nx.Graph()
+    for _, row in aggregated_data.iterrows():
+        G.add_edge(row['src_ip'], row['dst_ip'], weight=row['size'])
+    print(f"Graph created with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.")
+    return G
+
+#prep csv grah for autoencoder
+def prepare_graph_for_gae(G):
+    data = from_networkx(G)
+    num_nodes = G.number_of_nodes()
+    data.x = torch.eye(num_nodes)  # One-hot encoded node features
+    print(f"Prepared PyTorch Geometric graph with {data.num_nodes} nodes and {data.num_edges} edges.")
+    return data
+
+
+class GCNModelVAE(nn.Module):
+    def __init__(self, input_feat_dim, hidden_dim1, hidden_dim2, dropout):
+        super(GCNModelVAE, self).__init__()
+        self.gc1 = GraphConvolution(input_feat_dim, hidden_dim1, dropout, act=F.relu)
+        self.gc2 = GraphConvolution(hidden_dim1, hidden_dim2, dropout, act=lambda x: x)
+        self.gc3 = GraphConvolution(hidden_dim1, hidden_dim2, dropout, act=lambda x: x)
+        self.dc = InnerProductDecoder(dropout, act=lambda x: x)
+
+    def encode(self, x, adj):
+        hidden1 = self.gc1(x, adj)
+        return self.gc2(hidden1, adj), self.gc3(hidden1, adj)
+
+    def reparameterize(self, mu, logvar):
+        if self.training:
+            std = torch.exp(logvar)
+            eps = torch.randn_like(std)
+            return eps.mul(std).add_(mu)
+        else:
+            return mu
+
+    def forward(self, x, adj):
+        mu, logvar = self.encode(x, adj)
+        z = self.reparameterize(mu, logvar)
+        return self.dc(z), mu, logvar
+
+
+class InnerProductDecoder(nn.Module):
+    """Decoder for using inner product for prediction."""
+
+    def __init__(self, dropout, act=torch.sigmoid):
+        super(InnerProductDecoder, self).__init__()
+        self.dropout = dropout
+        self.act = act
+
+    def forward(self, z):
+        z = F.dropout(z, self.dropout, training=self.training)
+        adj = self.act(torch.mm(z, z.t()))
+        return adj
+    
+if __name__ == "__main__":
+
+     pcap_file = '/Users/nourmortada/Desktop/29.pcap'  
+     csv_file = 'network_data.csv' 
+
+   
+     df = extract_features(pcap_file, csv_file)
+     G = create_graph(csv_file)
+     data = prepare_graph_for_gae(G)
+
+    # train autoencoder with decoder
+     encoder, decoder, z = train_gae_with_custom_decoder(data)
+
+     anomalies = perform_anomaly_detection(z)
+     visualize_anomalies(z, anomalies)
+print(f"Number of nodes in embeddings: {len(z.detach().numpy())}")
