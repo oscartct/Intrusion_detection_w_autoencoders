@@ -2,54 +2,82 @@ from scapy.all import rdpcap
 import pandas as pd
 from collections import defaultdict
 from math import ceil
+from datetime import datetime, timedelta
 
-def load_chunks_from_pcap(pcap_file, overlap, max_packets = 1000000, time_interval = 1):
-    packet_times = [] 
+def load_chunks_from_pcap(pcap_file, overlap, max_packets=5000, chunk_size=250000, time_interval=60, output_csv="train_data.csv"):
+    packet_times = []
     features_list = []
 
-    if not (0 <= overlap < 1): # 
+    if not (0 <= overlap < 1):
         raise ValueError("Overlap must be between 0 and 1")
     
-    packets = rdpcap(pcap_file, count=max_packets)  # Read all packets
+    packets = rdpcap(pcap_file)  # Read all packets at once (you can break this into multiple reads if needed)
+    print(f"Number of packets in the PCAP file: {len(packets)}")
     
     if not packets:
         print("No packets found in the PCAP file.")
         return
 
     for packet in packets:
-        if packet.haslayer("IP"): # Ensure only processing packets on the IP layer
+        if packet.haslayer("IP"):  # Ensure only processing packets on the IP layer
             timestamp = packet.time 
             packet_times.append(timestamp)
     
     start_time = min(packet_times)
-    start_time = float(start_time) 
+    start_time = float(start_time)
 
     time_chunks = defaultdict(list)
     step_size = time_interval * (1 - overlap)
+    chunk_start_time = datetime(2017, 6, 6, 9, 0, 0)  # Start from this time for the first chunk
     
-    for packet in packets:
-        if packet.haslayer("IP"):
-            timestamp = packet.time
-            for i in range(ceil((timestamp - start_time) / step_size)): # Round up
-                window_start = start_time + i * step_size
-                if window_start <= timestamp < window_start + time_interval:
-                    time_chunks[window_start].append(packet)
+    # Process in 500k packets at a time
+    chunk_start_index = 0
+    total_chunks = len(packets) // chunk_size
+    last_chunk_index = total_chunks * chunk_size  # Track the last chunk index
+    
+    while chunk_start_index < len(packets):
+        chunk_end_index = chunk_start_index + chunk_size
+        chunk_end_index = min(chunk_end_index, len(packets))  # Ensure we don't go out of bounds
+        packet_chunk = packets[chunk_start_index:chunk_end_index]
+        chunk_start_index = chunk_end_index
+        
+        # Process the current chunk
+        time_chunks = defaultdict(list)
+        for packet in packet_chunk:
+            if packet.haslayer("IP"):
+                timestamp = packet.time
+                for i in range(ceil((timestamp - start_time) / step_size)):
+                    window_start = start_time + i * step_size
+                    if window_start <= timestamp < window_start + time_interval:
+                        time_chunks[window_start].append(packet)
 
-    prev_chunk_stats = None
-    for time_interval_start, packet_chunk in time_chunks.items():
-        features, current_chunk_stats = extract_features_from_pcap(packet_chunk, prev_chunk_stats)
-        features_list.append(features)
-        prev_chunk_stats = current_chunk_stats
+        prev_chunk_stats = None
+        
+        for time_interval_start, packet_chunk in sorted(time_chunks.items()):
+            features, current_chunk_stats, next_start_time = extract_features_from_pcap(
+                packet_chunk, prev_chunk_stats, chunk_start_time
+            )
+            prev_chunk_stats = current_chunk_stats
+            chunk_start_time = next_start_time  # Update the start time for the next chunk
+            features_list.append(features)
+        
+        # Print the chunk processing range with correct indices
+        print(f"Processed chunk from {chunk_start_index - chunk_size} to {chunk_start_index - 1}.")  # Corrected print statement
 
-    feature_names = list(prev_chunk_stats.keys()) if prev_chunk_stats else list(features.keys())
-    features_df = pd.DataFrame(features_list, columns=feature_names)
-    print("\nExtracted Features:")
-    save_features_to_csv(features_df)
+        # Check if this is the last chunk
+        is_last_chunk = chunk_start_index == len(packets)
+
+        # Save features only if it's not the last chunk or explicitly after processing the last chunk
+        if is_last_chunk or chunk_start_index % chunk_size == 0:  # Save after each chunk except the last
+            features_df = pd.DataFrame(features_list, columns=prev_chunk_stats.keys())
+            save_features_to_csv(features_df, output_csv)
+            features_list = []  # Clear features list to free memory
+    
     return features_df
 
-def extract_features_from_pcap(packets, prev_chunk_stats=None):
+def extract_features_from_pcap(packets, prev_chunk_stats, start_time):
     features = defaultdict(int)
-    
+
     # Counting protocols
     protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0}
     packet_sizes = []
@@ -114,13 +142,16 @@ def extract_features_from_pcap(packets, prev_chunk_stats=None):
         features["rate_of_change_packet_count"] = 0
         features["rate_of_change_byte_count"] = 0
 
-    return list(features.values()), features
+    features["start_time"] = start_time.strftime("%H:%M:%S.%f")[:-3]
 
-def save_features_to_csv(features_df):
-    csv = "train_data.csv"
-    features_df.to_csv(csv, mode='w', header=True, index=False)
-    print(f"Saved features to {csv}")
-    return
+    return list(features.values()), features, start_time + timedelta(seconds=45) 
+    
+def save_features_to_csv(features_df, output_csv):
+    # Check if the CSV file already exists to append or create it
+    mode = 'a' if pd.io.common.file_exists(output_csv) else 'w'
+    header = False if mode == 'a' else True  # If appending, do not write the header again, otherwise include it
+    features_df.to_csv(output_csv, mode=mode, header=header, index=False)
+    print(f"Saved features to {output_csv}")
 
 def load_features_from_csv(file_path):
     try:
@@ -134,13 +165,16 @@ def load_features_from_csv(file_path):
 
 if __name__ == "__main__":
     file_format = "pcap" # Change this to pcap to get new features and chunks 
-    csv = "train_data.pcap"
+    csv = "test_data.csv"
+    pcap_file = "Monday-WorkingHours.pcap"
     if file_format == "pcap":
-        pcap_file = "Monday-WorkingHours.pcap"
         print(f"Loading data from PCAP file: {pcap_file}...")
         # Change overlap for the "ladder" chunking, go between 0 and 0.99
         chunks = load_chunks_from_pcap(pcap_file, overlap=0.25)
     elif file_format == "csv":
         chunks = load_features_from_csv(csv)
-    print(chunks)
-            
+    #print(chunks)
+
+'''
+Autoencoder return chunks where anomalies happen, add code to obtain IPs in that chunk
+'''

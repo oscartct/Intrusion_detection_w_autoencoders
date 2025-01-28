@@ -8,8 +8,9 @@ import os
 from sklearn.preprocessing import StandardScaler
 
 def load_and_normalize_data(file_path):
-    """Load and preprocess test data."""
+    """Load and preprocess test data"""
     test_data = pd.read_csv(file_path)
+    test_data = test_data.drop(columns=['start_time'], errors='ignore')  # Drop the 'start_time' column
     scaler = StandardScaler()
     test_data_normalized = scaler.fit_transform(test_data)
     return t.tensor(test_data_normalized, dtype=t.float32)
@@ -103,30 +104,28 @@ def detect_anomalies(model, data, threshold=None, plot=True):
     return reconstruction_error, threshold, anomalies
 
 if __name__ == "__main__":
-    # Configuration
     train_file = 'train_data.csv'
     test_file = "test_data.csv"
     model_file = 'autoencoder_model.pth'
     batch_size = 32
-    hidden_dim = 64
+    hidden_dim = 128
     num_epochs = 40
     learning_rate = 0.001
 
-    # Load and preprocess data
     train_data = load_and_normalize_data(train_file)
     input_dim = train_data.shape[1]
     train_loader = create_dataloader(train_data, batch_size)
 
     if os.path.exists(model_file):
-        # If model exists, load it
+        # Load 
         model = load_model(model_file, input_dim, hidden_dim)
         print("Model loaded from file.")
     else:
-        # If model does not exist, train it
+        # Train
         model = Autoencoder(input_dim, hidden_dim)
         train_autoencoder(model, train_loader, num_epochs, learning_rate)
 
-        # Save the trained model
+        # Save 
         save_model(model, model_file)
 
     # Load and preprocess test data
