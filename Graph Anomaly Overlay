@@ -1,0 +1,92 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Jan 27 10:07:15 2025
+
+@author: ashru
+"""
+from PIL import Image, ImageDraw
+
+originalGraphLocation = "C:/Users/ashru/OneDrive/Desktop/128Graph.jpg"
+
+
+startTime = 8.00
+endTime = 17.00
+
+#attack list- note attack 3 had first two attacks merged as they are adjacent to each other
+#thursdayAttackList = [[[9.2,10.0]],[[10.15,10.35]],[[10.4,10.42]],[[14.19,14.21],[14.33,14.35]],[[14.53,15.0]],[[15.04,15.45]]]   
+thursdayAttackList = [[[8.45,9.5]],[[10.15,10.35]],[[10.4,10.42]],[[14.19,14.21],[14.33,14.35]],[[14.53,15.0]],[[15.04,15.45]]]   
+
+graphStartPixelX = 135
+graphStartPixelY = 47
+
+xPer1 = 2.13
+yHeight = 770
+
+
+#set up conversion between time and seconds where time is in form 8:25am= 8.25
+def timeToSeconds(time):
+    #convert time to seconds
+    minute = round((time*10)%1,1)/10
+    tens= round((time-minute)%1,1)
+    hours = round(time-(tens+minute),1)
+    timeInSeconds = round(60*(((minute+tens)*100)+60*hours ))
+    return timeInSeconds
+ 
+#convert seconds to time step in day   
+def secondsToSteps(seconds):
+    chunk = None   
+
+    normalisedTime = seconds-timeToSeconds(startTime)
+    
+    if(normalisedTime== 0):
+        chunk = 0
+    else:
+        chunk = normalisedTime/45 
+    return chunk
+       
+def stepsToPixels(steps):
+    pixel = graphStartPixelX + steps*xPer1  
+    return pixel
+
+def timeToSteps(time):
+    return secondsToSteps(timeToSeconds(time))
+
+def timeToPixels(time):
+    return stepsToPixels(timeToSteps(time))
+
+        
+background = Image.open(originalGraphLocation)
+
+overlay = Image.new('RGBA', background.size, (0,))
+draw = ImageDraw.Draw(overlay)  # Create a context for drawing things on it.
+
+
+print(timeToSteps(17))
+
+for i in range(len(thursdayAttackList)):
+    print(i)
+    for j in thursdayAttackList[i]:
+        x1 = timeToPixels(j[0])
+        x2 = timeToPixels(j[1])
+        print(timeToSteps(j[0]),timeToSteps(j[1]))
+        print(x1,stepsToPixels(secondsToSteps(timeToSeconds(j[0]))))
+        print(x2,stepsToPixels(secondsToSteps(timeToSeconds(j[1]))),'\n')
+        
+        draw.rectangle([x1,graphStartPixelY,x2,graphStartPixelY+yHeight],fill=(200, 200, 0,40))
+        # try:
+        #     draw.rectangle(((timeToPixels(int(j[0])),graphStartPixelY), ( ( timeToPixels(int(j[1]))),graphStartPixelY+yHeight)), fill=(200, 200, 0,40))
+        # except:
+        #     print(i,j)
+        #print(timeToPixels(int(j[0])))
+        #print(timeToPixels(int(j[1])))
+        
+x3  = timeToPixels(8.0) 
+x4 = timeToPixels(16.0)
+#draw.rectangle([x3, graphStartPixelY, x4,graphStartPixelY+yHeight],fill=(0, 0, 255,40))
+
+background.paste(overlay, (0, 0), overlay)
+background.show()
+
+#background.save("C:/Users/ashru/OneDrive/Desktop/two.png")
+print(timeToSteps(17.0))
+
